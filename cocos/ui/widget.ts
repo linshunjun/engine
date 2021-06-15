@@ -33,9 +33,8 @@ import { ccclass, help, executeInEditMode, executionOrder, menu, requireComponen
 import { EDITOR, DEV } from 'internal:constants';
 import { Component } from '../core/components';
 import { UITransform } from '../2d/framework/ui-transform';
-import { Size, Vec3 } from '../core/math';
-import { errorID } from '../core/platform/debug';
-import { SystemEventType } from '../core/platform/event-manager/event-enum';
+import { Size, Vec2, Vec3 } from '../core/math';
+import { errorID, warnID } from '../core/platform/debug';
 import { View } from '../core/platform/view';
 import visibleRect from '../core/platform/visible-rect';
 import { Scene } from '../core/scene-graph';
@@ -43,8 +42,9 @@ import { Node } from '../core/scene-graph/node';
 import { ccenum } from '../core/value-types/enum';
 import { TransformBit } from '../core/scene-graph/node-enum';
 import { legacyCC } from '../core/global-exports';
+import { NodeEventType } from '../core/scene-graph/node-event';
 
-const _zeroVec3 = new Vec3();
+const _tempScale = new Vec2();
 
 // returns a readonly size of the node
 export function getReadonlyNodeSize (parent: Node | Scene) {
@@ -66,10 +66,14 @@ export function getReadonlyNodeSize (parent: Node | Scene) {
     }
 }
 
-export function computeInverseTransForTarget (widgetNode: Node, target: Node, out_inverseTranslate: Vec3, out_inverseScale: Vec3) {
-    let scale = widgetNode.parent ? widgetNode.parent.getScale() : _zeroVec3;
-    let scaleX = scale.x;
-    let scaleY = scale.y;
+export function computeInverseTransForTarget (widgetNode: Node, target: Node, out_inverseTranslate: Vec2, out_inverseScale: Vec2) {
+    if (widgetNode.parent) {
+        _tempScale.set(widgetNode.parent.getScale().x, widgetNode.parent.getScale().y);
+    } else {
+        _tempScale.set(0, 0);
+    }
+    let scaleX = _tempScale.x;
+    let scaleY = _tempScale.y;
     let translateX = 0;
     let translateY = 0;
     for (let node = widgetNode.parent; ;) {
@@ -86,9 +90,13 @@ export function computeInverseTransForTarget (widgetNode: Node, target: Node, ou
         node = node.parent;    // loop increment
 
         if (node !== target) {
-            scale = node ? node.getScale() : _zeroVec3;
-            const sx = scale.x;
-            const sy = scale.y;
+            if (node) {
+                _tempScale.set(node.getScale().x, node.getScale().y);
+            } else {
+                _tempScale.set(0, 0);
+            }
+            const sx = _tempScale.x;
+            const sy = _tempScale.y;
             translateX *= sx;
             translateY *= sy;
             scaleX *= sx;
@@ -837,29 +845,29 @@ export class Widget extends Component {
 
     protected _registerEvent () {
         if (EDITOR && !legacyCC.GAME_VIEW) {
-            this.node.on(SystemEventType.TRANSFORM_CHANGED, this._adjustWidgetToAllowMovingInEditor, this);
-            this.node.on(SystemEventType.SIZE_CHANGED, this._adjustWidgetToAllowResizingInEditor, this);
+            this.node.on(NodeEventType.TRANSFORM_CHANGED, this._adjustWidgetToAllowMovingInEditor, this);
+            this.node.on(NodeEventType.SIZE_CHANGED, this._adjustWidgetToAllowResizingInEditor, this);
         } else {
-            this.node.on(SystemEventType.TRANSFORM_CHANGED, this._setDirtyByMode, this);
-            this.node.on(SystemEventType.SIZE_CHANGED, this._setDirtyByMode, this);
+            this.node.on(NodeEventType.TRANSFORM_CHANGED, this._setDirtyByMode, this);
+            this.node.on(NodeEventType.SIZE_CHANGED, this._setDirtyByMode, this);
         }
-        this.node.on(SystemEventType.ANCHOR_CHANGED, this._adjustWidgetToAnchorChanged, this);
-        this.node.on(SystemEventType.PARENT_CHANGED, this._adjustTargetToParentChanged, this);
+        this.node.on(NodeEventType.ANCHOR_CHANGED, this._adjustWidgetToAnchorChanged, this);
+        this.node.on(NodeEventType.PARENT_CHANGED, this._adjustTargetToParentChanged, this);
     }
 
     protected _unregisterEvent () {
         if (EDITOR && !legacyCC.GAME_VIEW) {
-            this.node.off(SystemEventType.TRANSFORM_CHANGED, this._adjustWidgetToAllowMovingInEditor, this);
-            this.node.off(SystemEventType.SIZE_CHANGED, this._adjustWidgetToAllowResizingInEditor, this);
+            this.node.off(NodeEventType.TRANSFORM_CHANGED, this._adjustWidgetToAllowMovingInEditor, this);
+            this.node.off(NodeEventType.SIZE_CHANGED, this._adjustWidgetToAllowResizingInEditor, this);
         } else {
-            this.node.off(SystemEventType.TRANSFORM_CHANGED, this._setDirtyByMode, this);
-            this.node.off(SystemEventType.SIZE_CHANGED, this._setDirtyByMode, this);
+            this.node.off(NodeEventType.TRANSFORM_CHANGED, this._setDirtyByMode, this);
+            this.node.off(NodeEventType.SIZE_CHANGED, this._setDirtyByMode, this);
         }
-        this.node.off(SystemEventType.ANCHOR_CHANGED, this._adjustWidgetToAnchorChanged, this);
+        this.node.off(NodeEventType.ANCHOR_CHANGED, this._adjustWidgetToAnchorChanged, this);
     }
 
     protected _removeParentEvent () {
-        this.node.off(SystemEventType.PARENT_CHANGED, this._adjustTargetToParentChanged, this);
+        this.node.off(NodeEventType.PARENT_CHANGED, this._adjustTargetToParentChanged, this);
     }
 
     protected _autoChangedValue (flag: AlignFlags, isAbs: boolean) {
@@ -892,8 +900,8 @@ export class Widget extends Component {
         const target = this._target || this.node.parent;
         if (target) {
             if (target.getComponent(UITransform)) {
-                target.on(SystemEventType.TRANSFORM_CHANGED, this._setDirtyByMode, this);
-                target.on(SystemEventType.SIZE_CHANGED, this._setDirtyByMode, this);
+                target.on(NodeEventType.TRANSFORM_CHANGED, this._setDirtyByMode, this);
+                target.on(NodeEventType.SIZE_CHANGED, this._setDirtyByMode, this);
             }
         }
     }
@@ -901,16 +909,16 @@ export class Widget extends Component {
     protected _unregisterTargetEvents () {
         const target = this._target || this.node.parent;
         if (target) {
-            target.off(SystemEventType.TRANSFORM_CHANGED, this._setDirtyByMode, this);
-            target.off(SystemEventType.SIZE_CHANGED, this._setDirtyByMode, this);
+            target.off(NodeEventType.TRANSFORM_CHANGED, this._setDirtyByMode, this);
+            target.off(NodeEventType.SIZE_CHANGED, this._setDirtyByMode, this);
         }
     }
 
     protected _unregisterOldParentEvents (oldParent: Node) {
         const target = this._target || oldParent;
         if (target) {
-            target.off(SystemEventType.TRANSFORM_CHANGED, this._setDirtyByMode, this);
-            target.off(SystemEventType.SIZE_CHANGED, this._setDirtyByMode, this);
+            target.off(NodeEventType.TRANSFORM_CHANGED, this._setDirtyByMode, this);
+            target.off(NodeEventType.SIZE_CHANGED, this._setDirtyByMode, this);
         }
     }
 

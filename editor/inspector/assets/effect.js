@@ -1,6 +1,6 @@
 'use strict';
 
-const { readJSONSync, existsSync } = require('fs-extra');
+const { readFileSync, existsSync } = require('fs');
 
 exports.template = `
 <div class="asset-effect">
@@ -9,7 +9,7 @@ exports.template = `
         <ui-select slot="content" class="shader-select"></ui-select>
     </ui-prop>
 
-    <ui-section expand class="config">
+    <ui-section expand class="config" cache-expand="effect-combinations">
         <ui-label slot="header" value="i18n:ENGINE.assets.effect.combinations" tooltip="i18n:ENGINE.assets.effect.combinationsTip"></ui-label>
         <div class="description">
             <ui-label value="i18n:ENGINE.assets.effect.choose"></ui-label>
@@ -172,6 +172,7 @@ const Elements = {
                             button.setAttribute('checked', 'true');
                         }
 
+                        panel.dataChange();
                         panel.dispatch('change');
                     });
                 });
@@ -194,6 +195,8 @@ const Elements = {
                 const section = document.createElement('ui-section');
                 panel.$.codes.appendChild(section);
                 section.setAttribute('class', 'config');
+                section.setAttribute('expand', '');
+                section.setAttribute('cache-expand', `effect-${glslKey}`);
 
                 const glslName = panel.glslNames[glslKey];
 
@@ -246,7 +249,7 @@ const Elements = {
 /**
  * A method to initialize the panel
  */
-exports.ready = function () {
+exports.ready = function() {
     for (const prop in Elements) {
         const element = Elements[prop];
         if (element.ready) {
@@ -260,7 +263,7 @@ exports.ready = function () {
  * @param assetList
  * @param metaList
  */
-exports.update = function (assetList, metaList) {
+exports.update = function(assetList, metaList) {
     this.assetList = assetList;
     this.metaList = metaList;
     this.asset = assetList[0];
@@ -302,7 +305,7 @@ exports.methods = {
             return false;
         }
 
-        const dataSource = readJSONSync(fileSource);
+        const dataSource = JSON.parse(readFileSync(fileSource, 'utf8'));
 
         if (!dataSource) {
             console.error('Read effect json file in library failed.');
@@ -380,7 +383,7 @@ exports.methods = {
             element.removeAttribute('disabled');
         }
     },
-    apply() {
+    dataChange() {
         const panel = this;
 
         // Need to exclude empty arrays, otherwise scene will report an error

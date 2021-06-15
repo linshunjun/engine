@@ -29,9 +29,9 @@
 
 import { ccclass, displayOrder, type, serializable } from 'cc.decorator';
 import { Camera } from '../../renderer/scene';
-import { IRenderPass, SetIndex } from '../define';
+import { SetIndex } from '../define';
 import { getPhaseID } from '../pass-phase';
-import { opaqueCompareFn, RenderQueue, transparentCompareFn } from '../render-queue';
+import { renderQueueClearFunc, RenderQueue, convertRenderQueue, renderQueueSortFunc } from '../render-queue';
 import { ClearFlagBit, Color, Rect } from '../../gfx';
 import { SRGBToLinear } from '../pipeline-funcs';
 import { RenderBatchedQueue } from '../render-batched-queue';
@@ -99,27 +99,7 @@ export class GbufferStage extends RenderStage {
     public activate (pipeline: DeferredPipeline, flow: GbufferFlow) {
         super.activate(pipeline, flow);
         for (let i = 0; i < this.renderQueues.length; i++) {
-            let phase = 0;
-            for (let j = 0; j < this.renderQueues[i].stages.length; j++) {
-                phase |= getPhaseID(this.renderQueues[i].stages[j]);
-            }
-            let sortFunc: (a: IRenderPass, b: IRenderPass) => number = opaqueCompareFn;
-            switch (this.renderQueues[i].sortMode) {
-            case RenderQueueSortMode.BACK_TO_FRONT:
-                sortFunc = transparentCompareFn;
-                break;
-            case RenderQueueSortMode.FRONT_TO_BACK:
-                sortFunc = opaqueCompareFn;
-                break;
-            default:
-                break;
-            }
-
-            this._renderQueues[i] = new RenderQueue({
-                isTransparent: this.renderQueues[i].isTransparent,
-                phases: phase,
-                sortFunc,
-            });
+            this._renderQueues[i] = convertRenderQueue(this.renderQueues[i]);
         }
     }
 
@@ -131,7 +111,7 @@ export class GbufferStage extends RenderStage {
         this._batchedQueue.clear();
         const pipeline = this._pipeline as DeferredPipeline;
         const device = pipeline.device;
-        this._renderQueues.forEach(this.renderQueueClearFunc);
+        this._renderQueues.forEach(renderQueueClearFunc);
 
         const renderObjects = pipeline.pipelineSceneData.renderObjects;
         if (renderObjects.length === 0) {
@@ -165,21 +145,14 @@ export class GbufferStage extends RenderStage {
                 }
             }
         }
-        this._renderQueues.forEach(this.renderQueueSortFunc);
+        this._renderQueues.forEach(renderQueueSortFunc);
 
         const cmdBuff = pipeline.commandBuffers[0];
 
         this._instancedQueue.uploadBuffers(cmdBuff);
         this._batchedQueue.uploadBuffers(cmdBuff);
-
-        const vp = camera.viewport;
-        // render area is not oriented
-        const w = camera.window!.hasOnScreenAttachments && device.surfaceTransform % 2 ? camera.height : camera.width;
-        const h = camera.window!.hasOnScreenAttachments && device.surfaceTransform % 2 ? camera.width : camera.height;
-        this._renderArea.x = vp.x * w;
-        this._renderArea.y = vp.y * h;
-        this._renderArea.width = vp.width * w * pipeline.pipelineSceneData.shadingScale;
-        this._renderArea.height = vp.height * h * pipeline.pipelineSceneData.shadingScale;
+        this._renderArea = pipeline.generateRenderArea(camera);
+        pipeline.updateQuadVertexData(this._renderArea);
 
         if (camera.clearFlag & ClearFlagBit.COLOR) {
             if (pipeline.pipelineSceneData.isHDR) {
@@ -213,23 +186,5 @@ export class GbufferStage extends RenderStage {
         this._batchedQueue.recordCommandBuffer(device, renderPass, cmdBuff);
 
         cmdBuff.endRenderPass();
-    }
-
-    /**
-     * @en Clear the given render queue
-     * @zh 清空指定的渲染队列
-     * @param rq The render queue
-     */
-    protected renderQueueClearFunc (rq: RenderQueue) {
-        rq.clear();
-    }
-
-    /**
-     * @en Sort the given render queue
-     * @zh 对指定的渲染队列执行排序
-     * @param rq The render queue
-     */
-    protected renderQueueSortFunc (rq: RenderQueue) {
-        rq.sort();
     }
 }

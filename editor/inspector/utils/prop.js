@@ -4,7 +4,7 @@
  * @param {*} value of dump
  * @returns {key:string dump:object}[]
  */
-exports.sortProp = function (propMap) {
+exports.sortProp = function(propMap) {
     const orderList = [];
     const normalList = [];
 
@@ -35,7 +35,7 @@ exports.sortProp = function (propMap) {
  * @param {object} dump
  * @param {(element,prop)=>void} onElementCreated
  */
-exports.getCustomPropElements = function (excludeList, dump, onElementCreated) {
+exports.getCustomPropElements = function(excludeList, dump, onElementCreated) {
     const customPropElements = [];
     const sortedProp = exports.sortProp(dump.value);
     sortedProp.forEach((prop) => {
@@ -54,7 +54,7 @@ exports.getCustomPropElements = function (excludeList, dump, onElementCreated) {
 /**
  * Tool function: recursively set readonly in resource data
  */
-exports.loopSetAssetDumpDataReadonly = function (dump) {
+exports.loopSetAssetDumpDataReadonly = function(dump) {
     if (typeof dump !== 'object') {
         return;
     }
@@ -82,7 +82,11 @@ exports.loopSetAssetDumpDataReadonly = function (dump) {
  * @param {object} data  dump | function
  * @param element
  */
-exports.setDisabled = function (data, element) {
+exports.setDisabled = function(data, element) {
+    if (!element) {
+        return;
+    }
+
     let disabled = data;
 
     if (typeof data === 'function') {
@@ -101,7 +105,11 @@ exports.setDisabled = function (data, element) {
  * @param {object} data  dump | function
  * @param element
  */
-exports.setReadonly = function (data, element) {
+exports.setReadonly = function(data, element) {
+    if (!element) {
+        return;
+    }
+
     let readonly = data;
 
     if (typeof data === 'function') {
@@ -114,7 +122,7 @@ exports.setReadonly = function (data, element) {
         element.removeAttribute('readonly');
     }
 
-    if (element.render) {
+    if (element.render && element.dump) {
         element.dump.readonly = readonly;
         element.render();
     }
@@ -125,7 +133,11 @@ exports.setReadonly = function (data, element) {
  * @param {object} data  dump | function
  * @param element
  */
-exports.setHidden = function (data, element) {
+exports.setHidden = function(data, element) {
+    if (!element) {
+        return;
+    }
+
     let hidden = data;
 
     if (typeof data === 'function') {
@@ -139,7 +151,7 @@ exports.setHidden = function (data, element) {
     }
 };
 
-exports.updatePropByDump = function (panel, dump) {
+exports.updatePropByDump = function(panel, dump) {
     panel.dump = dump;
 
     if (!panel.elements) {
@@ -158,9 +170,14 @@ exports.updatePropByDump = function (panel, dump) {
                 return;
             }
 
-            panel.$[key] = document.createElement('ui-prop');
-            panel.$[key].setAttribute('type', 'dump');
-            panel.$[key].render(dumpdata);
+            if (element && element.create) {
+                // when it need to go custom initialize
+                panel.$[key] = element.create.call(panel, dumpdata);
+            } else {
+                panel.$[key] = document.createElement('ui-prop');
+                panel.$[key].setAttribute('type', 'dump');
+                panel.$[key].render(dumpdata);
+            }
 
             /**
              * Defined in the ascending engine, while the custom order ranges from 0 - 100;
@@ -178,41 +195,57 @@ exports.updatePropByDump = function (panel, dump) {
                 return;
             }
 
-            panel.$[key].render(dumpdata);
+            if (panel.$[key].tagName === 'UI-PROP' && panel.$[key].getAttribute('type') === 'dump') {
+                panel.$[key].render(dumpdata);
+            }
         }
 
-        children.push(panel.$[key]);
+        if (panel.$[key]) {
+            if (!element || !element.isAppendToParent || element.isAppendToParent.call(panel)) {
+                children.push(panel.$[key]);
+            }
+        }
     });
 
     // Reorder
     children.sort((a, b) => a.displayOrder - b.displayOrder);
 
-    panel.$.componentContainer.replaceChildren(...children);
+    let $children = Array.from(panel.$.componentContainer.children);
+    children.forEach((child, i) => {
+        if (child === $children[i]) {
+            return;
+        }
 
-    children.forEach((child) => {
-        const key = child.dump.name;
+        panel.$.componentContainer.appendChild(child);
+    });
+
+    // delete extra children
+    $children.forEach(($child) => {
+        if (!children.includes($child)) {
+            $child.remove();
+        }
+    });
+
+    for (const key in panel.elements) {
         const element = panel.elements[key];
-
         if (element && element.ready) {
             element.ready.call(panel, panel.$[key], dump.value);
             element.ready = undefined; // ready needs to be executed only once
         }
-    });
+    }
 
-    children.forEach((child) => {
-        const key = child.dump.name;
+    for (const key in panel.elements) {
         const element = panel.elements[key];
-
         if (element && element.update) {
             element.update.call(panel, panel.$[key], dump.value);
         }
-    });
+    }
 };
 
 /**
  * Tool function: check whether the value of the attribute is consistent after multi-selection
  */
-exports.isMultipleInvalid = function (dump) {
+exports.isMultipleInvalid = function(dump) {
     let invalid = false;
 
     if (dump.values && dump.values.some((ds) => ds !== dump.value)) {

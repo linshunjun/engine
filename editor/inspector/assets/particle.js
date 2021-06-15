@@ -3,7 +3,7 @@ exports.template = `
     <div class="content"
         id="content"
     >
-        <ui-prop is="asset">
+        <ui-prop is="asset" readonly>
             <ui-label slot="label"
                 tooltip="i18n:ENGINE.assets.particle.spriteFrameTip"
                 value="i18n:ENGINE.assets.particle.spriteFrame"
@@ -23,12 +23,12 @@ exports.$ = {
     asset: '#asset',
 };
 
-exports.ready = function () {
+exports.ready = function() {
     // Note: Currently, the material of 2d particles cannot be changed, ui-asset readonly, so the following is not valid
     this.$.asset.addEventListener('confirm', this.onDataChanged.bind(this, 'spriteFrameUuid'));
 };
 
-exports.update = function (assetList, metaList) {
+exports.update = function(assetList, metaList) {
     this.assetList = assetList;
     this.metaList = metaList;
     this.asset = assetList[0];

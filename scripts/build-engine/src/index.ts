@@ -28,6 +28,7 @@ import removeDeprecatedFeatures from './remove-deprecated-features';
 import { StatsQuery } from './stats-query';
 import { filePathToModuleRequest } from './utils';
 import { assetRef as rpAssetRef, pathToAssetRefURL } from './rollup-plugins/asset-ref';
+import { codeAsset } from './rollup-plugins/code-asset';
 
 export { ModuleOption, enumerateModuleOptionReps, parseModuleOption };
 
@@ -333,6 +334,7 @@ async function doBuild ({
         exclude: [
             /node_modules[/\\]@cocos[/\\]ammo/,
             /node_modules[/\\]@cocos[/\\]cannon/,
+            /node_modules[/\\]@cocos[/\\]physx/,
         ],
         comments: false, // Do not preserve comments, even in debug build since we have source map
         overrides: [{
@@ -352,6 +354,19 @@ async function doBuild ({
     };
 
     const rollupPlugins: rollup.Plugin[] = [];
+
+    const codeAssetMapping: Record<string, string> = {};
+    if (rollupFormat === 'system' || rollupFormat === 'systemjs') {
+        // `@cocos/physx` is too big(~6Mb) and cause memory crash.
+        // Our temporary solution: exclude @cocos/physx from bundling and connect it with source map.
+        rollupPlugins.push(codeAsset({
+            resultMapping: codeAssetMapping,
+            include: [
+                /node_modules[/\\]@cocos[/\\]physx/,
+            ],
+        }));
+    }
+
     if (options.noDeprecatedFeatures) {
         rollupPlugins.push(removeDeprecatedFeatures(
             typeof options.noDeprecatedFeatures === 'string' ? options.noDeprecatedFeatures : undefined,
@@ -467,6 +482,13 @@ async function doBuild ({
         if (typeof warning !== 'string') {
             if (warning.code === 'CIRCULAR_DEPENDENCY') {
                 hasCriticalWarns = true;
+            } else if (warning.code === 'THIS_IS_UNDEFINED') {
+                // TODO: It's really inappropriate to do this...
+                // Let's fix these files instead of suppressing rollup.
+                if (warning.id?.match(/(?:spine-core\.js$)|(?:dragonBones\.js$)/)) {
+                    console.debug(`Rollup warning 'THIS_IS_UNDEFINED' is omitted for ${warning.id}`);
+                    return;
+                }
             }
         }
 
@@ -509,6 +531,14 @@ import wasmBinaryURL from '${pathToAssetRefURL(wasmBinaryPath)}';
 import Ammo from '${filePathToModuleRequest(ammoJsWasmModule)}';
 export default Ammo;
 const isWasm = true;
+export { isWasm, wasmBinaryURL };
+`;
+    } else {
+        rpVirtualOptions['@cocos/ammo'] = `
+import Ammo from '${filePathToModuleRequest(ammoJsAsmJsModule)}';
+export default Ammo;
+const isWasm = false;
+const wasmBinaryURL = '';
 export { isWasm, wasmBinaryURL };
 `;
     }
@@ -568,6 +598,8 @@ export { isWasm, wasmBinaryURL };
     }
 
     Object.assign(result.exports, validEntryChunks);
+
+    Object.assign(result.exports, codeAssetMapping);
 
     result.dependencyGraph = {};
     for (const output of rollupOutput.output) {

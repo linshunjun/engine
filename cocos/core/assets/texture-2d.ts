@@ -36,6 +36,7 @@ import { PixelFormat } from './asset-enum';
 import { ImageAsset } from './image-asset';
 import { PresumedGFXTextureInfo, SimpleTexture } from './simple-texture';
 import { legacyCC } from '../global-exports';
+import { js } from '../utils/js';
 
 /**
  * @en The create information for [[Texture2D]]
@@ -258,8 +259,7 @@ export class Texture2D extends SimpleTexture {
                 continue;
             }
             const mipmapUUID = data.mipmaps[i];
-            handle.result.push(this._mipmaps, `${i}`, mipmapUUID);
-            this._mipmaps[i]._texture = this;
+            handle.result.push(this._mipmaps, `${i}`, mipmapUUID, js._getClassId(ImageAsset));
         }
     }
 
@@ -283,6 +283,17 @@ export class Texture2D extends SimpleTexture {
         if (ready) {
             super._textureReady();
         }
+    }
+
+    public initDefault (uuid?: string) {
+        super.initDefault(uuid);
+        const imageAsset = new ImageAsset();
+        imageAsset.initDefault();
+        this.image = imageAsset;
+    }
+
+    public validate () {
+        return this.mipmaps && this.mipmaps.length !== 0;
     }
 }
 

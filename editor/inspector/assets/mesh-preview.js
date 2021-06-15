@@ -5,6 +5,15 @@ exports.template = `
     <div class="info">
         <ui-label value="Vertices:0" class="vertices"></ui-label>
         <ui-label value="Triangles:0" class="triangles"></ui-label>
+        <ui-label value="" class="uvsLabel"></ui-label>
+    </div>
+    <div>
+        <div>
+            <ui-label value="" class="minPosLabel"></ui-label>
+        </div>
+        <div>
+            <ui-label value="" class="maxPosLabel"></ui-label>
+        </div>
     </div>
     <div class="image">
         <canvas class="canvas"></canvas>
@@ -41,6 +50,9 @@ exports.$ = {
     triangles: '.triangles',
     image: '.image',
     canvas: '.canvas',
+    uvsLabel: '.uvsLabel',
+    minPosLabel: '.minPosLabel',
+    maxPosLabel: '.maxPosLabel',
 };
 
 const Elements = {
@@ -48,13 +60,11 @@ const Elements = {
         ready() {
             const panel = this;
 
-            panel.$.canvas.addEventListener('mousedown', (event) => {
-                // event.target.requestPointerLock();
+            panel.$.canvas.addEventListener('mousedown', async (event) => {
+                await Editor.Message.request('scene', 'on-mesh-preview-mouse-down', { x: event.x, y: event.y });
 
-                Editor.Message.request('scene', 'on-mesh-preview-mouse-down', { x: event.x, y: event.y });
-
-                function mousemove(event) {
-                    Editor.Message.send('scene', 'on-mesh-preview-mouse-move', {
+                async function mousemove(event) {
+                    await Editor.Message.request('scene', 'on-mesh-preview-mouse-move', {
                         movementX: event.movementX,
                         movementY: event.movementY,
                     });
@@ -62,10 +72,8 @@ const Elements = {
                     panel.isPreviewDataDirty = true;
                 }
 
-                function mouseup(event) {
-                    // document.exitPointerLock();
-
-                    Editor.Message.send('scene', 'on-mesh-preview-mouse-up', {
+                async function mouseup(event) {
+                    await Editor.Message.request('scene', 'on-mesh-preview-mouse-up', {
                         x: event.x,
                         y: event.y,
                     });
@@ -79,7 +87,6 @@ const Elements = {
                 document.addEventListener('mousemove', mousemove);
                 document.addEventListener('mouseup', mouseup);
 
-               
                 panel.isPreviewDataDirty = true;
             });
 
@@ -97,28 +104,26 @@ const Elements = {
         async update() {
             const panel = this;
 
-            await panel.glPreview.init({ width: panel.$.canvas.clientWidth, height: panel.$.canvas.clientHeight });
-            await Editor.Message.request('scene', 'set-mesh-preview-mesh', panel.asset.uuid);
-
-            // After await, the panel no longer exists
             if (!panel.$.canvas) {
                 return;
             }
 
+            await panel.glPreview.init({ width: panel.$.canvas.clientWidth, height: panel.$.canvas.clientHeight });
+            const info = await Editor.Message.request('scene', 'set-mesh-preview-mesh', panel.asset.uuid);
+            panel.infoUpdate(info);
             panel.refreshPreview();
         },
         close() {
             const panel = this;
 
             panel.resizeObserver.unobserve(panel.$.image);
-        }
+        },
     },
     info: {
         ready() {
             const panel = this;
 
             panel.infoUpdate = Elements.info.update.bind(panel);
-            Editor.Message.addBroadcastListener('scene:mesh-preview-mesh-info', panel.infoUpdate);
         },
         update(info) {
             if (!info) {
@@ -127,20 +132,41 @@ const Elements = {
 
             const panel = this;
 
-            panel.$.vertices.value = 'Vertices:' + info.vertices;
-            panel.$.triangles.value = 'Triangles:' + info.polygons;
+            panel.$.vertices.value = 'Vertices: ' + info.vertices;
+            panel.$.triangles.value = 'Triangles: ' + info.polygons;
+
+            panel.$.uvsLabel.value = '';
+            if (info.uvs.length > 0) {
+                panel.$.uvsLabel.value = 'UV: ';
+                info.uvs.forEach((uvIndex, index) => {
+                    panel.$.uvsLabel.value += uvIndex;
+                    if (index !== info.uvs.length - 1) {
+                        panel.$.uvsLabel.value += ',';
+                    }
+                });
+            }
+
+            panel.$.minPosLabel.value = '';
+            if (info.minPosition) {
+                const pos = info.minPosition;
+                panel.$.minPosLabel.value = `MinPos: (${pos.x.toFixed(3)}, ${pos.y.toFixed(3)}, ${pos.z.toFixed(3)})`;
+            }
+
+            panel.$.maxPosLabel.value = '';
+            if (info.maxPosition) {
+                const pos = info.maxPosition;
+                panel.$.maxPosLabel.value = `MaxPos: (${pos.x.toFixed(3)}, ${pos.y.toFixed(3)}, ${pos.z.toFixed(3)})`;
+            }
 
             panel.isPreviewDataDirty = true;
         },
         close() {
-            const panel = this;
-            Editor.Message.removeBroadcastListener('scene:mesh-preview-mesh-info', panel.infoUpdate);
             Editor.Message.request('scene', 'hide-mesh-preview');
         },
     },
 };
 
-exports.update = function (assetList, metaList) {
+exports.update = function(assetList, metaList) {
     this.assetList = assetList;
     this.metaList = metaList;
     this.asset = assetList[0];
@@ -154,7 +180,7 @@ exports.update = function (assetList, metaList) {
     }
 };
 
-exports.ready = function () {
+exports.ready = function() {
     for (const prop in Elements) {
         const element = Elements[prop];
         if (element.ready) {
@@ -163,7 +189,7 @@ exports.ready = function () {
     }
 };
 
-exports.close = function () {
+exports.close = function() {
     for (const prop in Elements) {
         const element = Elements[prop];
         if (element.close) {
@@ -176,11 +202,14 @@ exports.methods = {
     async refreshPreview() {
         const panel = this;
 
+        // After await, the panel no longer exists
         if (!panel.$.canvas) {
             return;
         }
 
         if (panel.isPreviewDataDirty) {
+            panel.isPreviewDataDirty = false;
+
             try {
                 const canvas = panel.$.canvas;
                 const image = panel.$.image;
@@ -204,8 +233,6 @@ exports.methods = {
             } catch (e) {
                 console.warn(e);
             }
-
-            panel.isPreviewDataDirty = false;
         }
 
         cancelAnimationFrame(panel.animationId);

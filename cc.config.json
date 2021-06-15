@@ -45,7 +45,8 @@
                 "cocos/core/gfx/index.ts": "cocos/core/gfx/index.jsb.ts",
                 "cocos/core/gfx/pipeline-state.ts": "cocos/core/gfx/pipeline-state.jsb.ts",
                 "cocos/spine/index.ts": "cocos/spine/index.jsb.ts",
-                "cocos/dragon-bones/index.ts": "cocos/dragon-bones/index.jsb.ts"
+                "cocos/dragon-bones/index.ts": "cocos/dragon-bones/index.jsb.ts",
+                "cocos/core/renderer/scene/native-scene.ts": "cocos/core/renderer/scene/native-scene.jsb.ts"
             }
         },
         {
@@ -54,7 +55,8 @@
             "overrides": {
                 "pal/minigame": "pal/minigame/non-minigame.ts",
                 "pal/audio": "pal/audio/web/player.ts",
-                "pal/system": "pal/system/web/system.ts"
+                "pal/system": "pal/system/web/system.ts",
+                "pal/input": "pal/input/web/index.ts"
             }
         },
         {
@@ -63,7 +65,8 @@
             "overrides": {
                 "pal/minigame": "pal/minigame/non-minigame.ts",
                 "pal/audio": "pal/audio/native/player.ts",
-                "pal/system": "pal/system/native/system.ts"
+                "pal/system": "pal/system/native/system.ts",
+                "pal/input": "pal/input/native/index.ts"
             }
         },
         {
@@ -72,7 +75,8 @@
             "overrides": {
                 "pal/minigame": "pal/minigame/{{context.platform.toLowerCase()}}.ts",
                 "pal/audio": "pal/audio/minigame/player.ts",
-                "pal/system": "pal/system/minigame/system.ts"
+                "pal/system": "pal/system/minigame/system.ts",
+                "pal/input": "pal/input/minigame/index.ts"
             }
         },
         {
@@ -81,7 +85,8 @@
             "overrides": {
                 "pal/minigame": "pal/minigame/runtime.ts",
                 "pal/audio": "pal/audio/minigame/player.ts",
-                "pal/system": "pal/system/minigame/system.ts"
+                "pal/system": "pal/system/minigame/system.ts",
+                "pal/input": "pal/input/minigame/index.ts"
             }
         }
     ]

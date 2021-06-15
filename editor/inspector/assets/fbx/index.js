@@ -1,5 +1,4 @@
 'use strict';
-
 const path = require('path');
 
 exports.template = `
@@ -92,7 +91,7 @@ const Elements = {
         },
         update() {
             const panel = this;
-
+            Editor.Message.broadcast('fbx-inspector:change-tab', panel.activeTab);
             panel.$.tabPanel.setAttribute('src', Components[panel.activeTab]);
             panel.$.tabPanel.update(panel.assetList, panel.metaList);
         },
@@ -104,7 +103,7 @@ const Elements = {
  * @param assetList
  * @param metaList
  */
-exports.update = function (assetList, metaList) {
+exports.update = function(assetList, metaList) {
     this.assetList = assetList;
     this.metaList = metaList;
     this.asset = assetList[0];
@@ -121,7 +120,7 @@ exports.update = function (assetList, metaList) {
 /**
  * Method of initializing the panel
  */
-exports.ready = function () {
+exports.ready = function() {
     for (const prop in Elements) {
         const element = Elements[prop];
         if (element.ready) {
@@ -135,9 +134,7 @@ exports.methods = {
      * Update whether a data is editable in multi-select state
      */
     updateInvalid(element, prop) {
-        const invalid = this.metaList.some((meta) => {
-            return meta.userData[prop] !== this.meta.userData[prop];
-        });
+        const invalid = this.metaList.some((meta) => meta.userData[prop] !== this.meta.userData[prop]);
         element.invalid = invalid;
     },
     /**

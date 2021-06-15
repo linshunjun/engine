@@ -36,11 +36,12 @@ import { createBoundTarget, createBufferedTarget, IBufferedTarget, IBoundTarget 
 import { Playable } from './playable';
 import { WrapMode, WrapModeMask, WrappedInfo } from './types';
 import { HierarchyPath, evaluatePath, TargetPath } from './target-path';
-import { BlendStateBuffer, createBlendStateWriter, IBlendStateWriter } from '../../3d/skeletal-animation/skeletal-animation-blending';
+import { BlendStateBuffer, BlendStateWriter } from '../../3d/skeletal-animation/skeletal-animation-blending';
 import { legacyCC } from '../global-exports';
 import { ccenum } from '../value-types/enum';
 import { IValueProxyFactory } from './value-proxy';
-import { assertIsTrue } from '../data/utils/asserts';
+import { assertIsNonNullable, assertIsTrue } from '../data/utils/asserts';
+import { debug } from '../platform/debug';
 
 /**
  * @en The event type supported by Animation
@@ -88,6 +89,7 @@ export class ICurveInstance {
     private _boundTarget: IBoundTarget;
     private _rootTargetProperty?: string;
     private _curveDetail: Omit<IRuntimeCurve, 'sampler'>;
+    private declare _shouldLerp: boolean;
 
     constructor (
         runtimeCurve: Omit<IRuntimeCurve, 'sampler'>,
@@ -98,14 +100,12 @@ export class ICurveInstance {
         this._curveDetail = runtimeCurve;
 
         this._boundTarget = boundTarget;
+        this._shouldLerp = runtimeCurve.curve.hasLerp();
     }
 
-    public applySample (ratio: number, index: number, lerpRequired: boolean, samplerResultCache, weight: number) {
-        if (this._curve.empty()) {
-            return;
-        }
+    public applySample (ratio: number, index: number, inBetween: boolean, samplerResultCache, weight: number) {
         let value: any;
-        if (!this._curve.hasLerp() || !lerpRequired) {
+        if (!this._shouldLerp || !inBetween) {
             value = this._curve.valueAt(index);
         } else {
             value = this._curve.valueBetween(
@@ -287,8 +287,9 @@ export class AnimationState extends Playable {
 
     set playbackRange (value) {
         assertIsTrue(value.max > value.min);
-        this._playbackRange.min = value.min;
-        this._playbackRange.max = value.max;
+        this._playbackRange.min = Math.max(value.min, 0);
+        this._playbackRange.max = Math.min(value.max, this.duration);
+        this._playbackDuration = this._playbackRange.max - this._playbackRange.min;
         this.setTime(0.0);
     }
 
@@ -325,7 +326,14 @@ export class AnimationState extends Playable {
     /**
      * The weight.
      */
-    public weight = 0;
+    get weight () {
+        return this._weight;
+    }
+
+    set weight (value) {
+        this._weight = value;
+        this._blendStateWriterHost.weight = value;
+    }
 
     public frameRate = 0;
 
@@ -366,13 +374,15 @@ export class AnimationState extends Playable {
     private _lastWrapInfoEvent: WrappedInfo | null = null;
     private _wrappedInfo = new WrappedInfo();
     private _blendStateBuffer: BlendStateBuffer | null = null;
-    private _blendStateWriters: IBlendStateWriter[] = [];
+    private _blendStateWriters: BlendStateWriter<any>[] = [];
     private _allowLastFrame = false;
     private _blendStateWriterHost = {
         weight: 0,
-        enabled: false,
     };
     private _playbackRange: { min: number; max: number; };
+    private _playbackDuration = 0;
+    private _invDuration = 1.0;
+    private _weight = 0.0;
 
     constructor (clip: AnimationClip, name = '') {
         super();
@@ -382,6 +392,10 @@ export class AnimationState extends Playable {
             min: 0,
             max: this._clip.duration,
         };
+        this._playbackDuration = clip.duration;
+        if (!clip.duration) {
+            debug(`Clip ${clip.name} has zero duration.`);
+        }
     }
 
     /**
@@ -397,13 +411,11 @@ export class AnimationState extends Playable {
         this._destroyBlendStateWriters();
         this._samplerSharedGroups.length = 0;
         this._blendStateBuffer = legacyCC.director.getAnimationManager()?.blendState ?? null;
-        if (this._blendStateBuffer) {
-            this._blendStateBuffer.bindState(this);
-        }
         this._targetNode = root;
         const clip = this._clip;
 
         this.duration = clip.duration;
+        this._invDuration = 1.0 / this.duration;
         this.speed = clip.speed;
         this.wrapMode = clip.wrapMode;
         this.frameRate = clip.sample;
@@ -411,6 +423,7 @@ export class AnimationState extends Playable {
             min: 0,
             max: clip.duration,
         };
+        this._playbackDuration = clip.duration;
 
         if ((this.wrapMode & WrapModeMask.Loop) === WrapModeMask.Loop) {
             this.repeatCount = Infinity;
@@ -421,41 +434,37 @@ export class AnimationState extends Playable {
         /**
          * Create the bound target. Especially optimized for skeletal case.
          */
-        const createBoundTargetOptimized = <BoundTargetT extends IBoundTarget>(
-            createFn: (...args: Parameters<typeof createBoundTarget>) => BoundTargetT | null,
+        const createBoundTargetOptimized = (
             rootTarget: any,
             path: TargetPath[],
             valueAdapter: IValueProxyFactory | undefined,
             isConstant: boolean,
-        ): BoundTargetT | null => {
-            if (!isTargetingTRS(path) || !this._blendStateBuffer) {
-                return createFn(rootTarget, path, valueAdapter);
+        ): IBoundTarget | null => {
+            if (!clip.enableTrsBlending || !isTargetingTRS(path) || !this._blendStateBuffer) {
+                return createBoundTarget(rootTarget, path, valueAdapter);
             } else {
                 const targetNode = evaluatePath(rootTarget, ...path.slice(0, path.length - 1));
                 if (targetNode !== null && targetNode instanceof Node) {
                     const propertyName = path[path.length - 1] as 'position' | 'rotation' | 'scale' | 'eulerAngles';
-                    const blendStateWriter = createBlendStateWriter(
-                        this._blendStateBuffer,
+                    const blendStateWriter = this._blendStateBuffer.createWriter(
                         targetNode,
                         propertyName,
                         this._blendStateWriterHost,
                         isConstant,
                     );
                     this._blendStateWriters.push(blendStateWriter);
-                    return createFn(rootTarget, [], blendStateWriter);
+                    return blendStateWriter;
                 }
             }
             return null;
         };
 
         this._commonTargetStatuses = clip.commonTargets.map((commonTarget, index) => {
-            const target = createBoundTargetOptimized(
-                createBufferedTarget,
-                root,
-                commonTarget.modifiers,
-                commonTarget.valueAdapter,
-                false,
-            );
+            const boundTarget = createBoundTargetOptimized(root, commonTarget.modifiers, commonTarget.valueAdapter, false);
+            if (!boundTarget) {
+                return null;
+            }
+            const target = createBufferedTarget(boundTarget);
             if (target === null) {
                 return null;
             } else {
@@ -471,6 +480,9 @@ export class AnimationState extends Playable {
         }
         for (let iPropertyCurve = 0; iPropertyCurve < propertyCurves.length; ++iPropertyCurve) {
             const propertyCurve = propertyCurves[iPropertyCurve];
+            if (propertyCurve.curve.empty()) {
+                continue;
+            }
             let samplerSharedGroup = this._samplerSharedGroups.find((value) => value.sampler === propertyCurve.sampler);
             if (!samplerSharedGroup) {
                 samplerSharedGroup = makeSamplerSharedGroup(propertyCurve.sampler);
@@ -489,7 +501,6 @@ export class AnimationState extends Playable {
             }
 
             const boundTarget = createBoundTargetOptimized(
-                createBoundTarget,
                 rootTarget,
                 propertyCurve.modifiers,
                 propertyCurve.valueAdapter,
@@ -512,13 +523,6 @@ export class AnimationState extends Playable {
 
     public destroy () {
         this._destroyBlendStateWriters();
-    }
-
-    /**
-     * @private
-     */
-    public onBlendFinished () {
-        this._blendStateWriterHost.enabled = false;
     }
 
     /**
@@ -667,12 +671,10 @@ export class AnimationState extends Playable {
     }
 
     protected _sampleCurves (ratio: number) {
-        this._blendStateWriterHost.weight = this.weight;
-        this._blendStateWriterHost.enabled = true;
-
+        const commonTargetStatuses = this._commonTargetStatuses;
         // Before we sample, we pull values of common targets.
-        for (let iCommonTarget = 0; iCommonTarget < this._commonTargetStatuses.length; ++iCommonTarget) {
-            const commonTargetStatus = this._commonTargetStatuses[iCommonTarget];
+        for (let iCommonTarget = 0, length = commonTargetStatuses.length; iCommonTarget < length; ++iCommonTarget) {
+            const commonTargetStatus = commonTargetStatuses[iCommonTarget];
             if (!commonTargetStatus) {
                 continue;
             }
@@ -680,13 +682,15 @@ export class AnimationState extends Playable {
             commonTargetStatus.changed = false;
         }
 
-        for (let iSamplerSharedGroup = 0, szSamplerSharedGroup = this._samplerSharedGroups.length;
+        let index = 0;
+        let lerpRequired = false;
+        const samplerSharedGroups = this._samplerSharedGroups;
+        for (let iSamplerSharedGroup = 0, szSamplerSharedGroup = samplerSharedGroups.length;
             iSamplerSharedGroup < szSamplerSharedGroup; ++iSamplerSharedGroup) {
-            const samplerSharedGroup = this._samplerSharedGroups[iSamplerSharedGroup];
-            const sampler = samplerSharedGroup.sampler;
-            const { samplerResultCache } = samplerSharedGroup;
-            let index = 0;
-            let lerpRequired = false;
+            const samplerSharedGroup = samplerSharedGroups[iSamplerSharedGroup];
+            const { sampler, samplerResultCache } = samplerSharedGroup;
+
+            lerpRequired = false;
             if (!sampler) {
                 index = 0;
             } else {
@@ -708,12 +712,13 @@ export class AnimationState extends Playable {
                 }
             }
 
-            for (let iCurveInstance = 0, szCurves = samplerSharedGroup.curves.length;
+            const curves = samplerSharedGroup.curves;
+            for (let iCurveInstance = 0, szCurves = curves.length;
                 iCurveInstance < szCurves; ++iCurveInstance) {
-                const curveInstance = samplerSharedGroup.curves[iCurveInstance];
+                const curveInstance = curves[iCurveInstance];
                 curveInstance.applySample(ratio, index, lerpRequired, samplerResultCache, this.weight);
                 if (curveInstance.commonTargetIndex !== undefined) {
-                    const commonTargetStatus = this._commonTargetStatuses[curveInstance.commonTargetIndex];
+                    const commonTargetStatus = commonTargetStatuses[curveInstance.commonTargetIndex];
                     if (commonTargetStatus) {
                         commonTargetStatus.changed = true;
                     }
@@ -722,8 +727,8 @@ export class AnimationState extends Playable {
         }
 
         // After sample, we push values of common targets.
-        for (let iCommonTarget = 0; iCommonTarget < this._commonTargetStatuses.length; ++iCommonTarget) {
-            const commonTargetStatus = this._commonTargetStatuses[iCommonTarget];
+        for (let iCommonTarget = 0, length = commonTargetStatuses.length; iCommonTarget < length; ++iCommonTarget) {
+            const commonTargetStatus = commonTargetStatuses[iCommonTarget];
             if (!commonTargetStatus) {
                 continue;
             }
@@ -759,13 +764,12 @@ export class AnimationState extends Playable {
     }
 
     private simpleProcess () {
-        const playbackStart = this._getPlaybackStart();
-        const playbackEnd = this._getPlaybackEnd();
-        const playbackDuration = playbackEnd - playbackStart;
+        const playbackStart = this._playbackRange.min;
+        const playbackDuration = this._playbackDuration;
 
         let time = this.time % playbackDuration;
         if (time < 0) { time += playbackDuration; }
-        const ratio = (playbackStart + time) / this.duration;
+        const ratio = (playbackStart + time) * this._invDuration;
         this._sampleCurves(ratio);
 
         if (!EDITOR || legacyCC.GAME_VIEW) {
@@ -867,11 +871,11 @@ export class AnimationState extends Playable {
     }
 
     private _getPlaybackStart () {
-        return Math.max(this._playbackRange.min, 0);
+        return this._playbackRange.min;
     }
 
     private _getPlaybackEnd () {
-        return Math.min(this._playbackRange.max, this.duration);
+        return this._playbackRange.max;
     }
 
     private _sampleEvents (wrapInfo: WrappedInfo) {
@@ -986,15 +990,16 @@ export class AnimationState extends Playable {
     }
 
     private _destroyBlendStateWriters () {
+        if (this._blendStateWriters.length) {
+            assertIsNonNullable(this._blendStateBuffer);
+        }
         for (let iBlendStateWriter = 0; iBlendStateWriter < this._blendStateWriters.length; ++iBlendStateWriter) {
-            this._blendStateWriters[iBlendStateWriter].destroy();
+            this._blendStateBuffer!.destroyWriter(this._blendStateWriters[iBlendStateWriter]);
         }
         this._blendStateWriters.length = 0;
         if (this._blendStateBuffer) {
-            this._blendStateBuffer.unbindState(this);
             this._blendStateBuffer = null;
         }
-        this._blendStateWriterHost.enabled = false;
     }
 }
 

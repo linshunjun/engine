@@ -18,10 +18,14 @@ const Elements = texture.Elements;
  * @param assetList
  * @param metaList
  */
-exports.update = function (assetList, metaList) {
+exports.update = function(assetList, metaList) {
+    this.assetList = assetList;
+    this.metaList = metaList;
     this.asset = assetList[0];
-    this.userData = metaList[0].userData.textureSetting;
-    this.userDataList = metaList.map((item) => item.userData.textureSetting);
+    this.meta = metaList[0];
+
+    this.userData = this.meta.userData.textureSetting;
+    this.userDataList = this.metaList.map((item) => item.userData.textureSetting);
 
     for (const prop in Elements) {
         const element = Elements[prop];
@@ -36,4 +40,4 @@ exports.update = function (assetList, metaList) {
  */
 exports.ready = texture.ready;
 
-exports.methods = texture.methods;;
+exports.methods = texture.methods;

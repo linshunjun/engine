@@ -33,19 +33,20 @@ import { Camera } from '../../renderer/scene';
 import { localDescriptorSetLayout, UBODeferredLight, SetIndex, UBOForwardLight } from '../define';
 import { getPhaseID } from '../pass-phase';
 import { Color, Rect, Shader, Buffer, BufferUsageBit, MemoryUsageBit, BufferInfo, BufferViewInfo, DescriptorSet, DescriptorSetLayoutInfo,
-    DescriptorSetLayout, DescriptorSetInfo, PipelineState, ClearFlags, ClearFlagBit } from '../../gfx';
+    DescriptorSetLayout, DescriptorSetInfo, PipelineState, ClearFlagBit } from '../../gfx';
 import { IRenderStageInfo, RenderStage } from '../render-stage';
 import { DeferredStagePriority } from './enum';
 import { LightingFlow } from './lighting-flow';
 import { DeferredPipeline } from './deferred-pipeline';
 import { PlanarShadowQueue } from '../planar-shadow-queue';
 import { Material } from '../../assets/material';
-import { ShaderPool } from '../../renderer/core/memory-pools';
 import { PipelineStateManager } from '../pipeline-state-manager';
-import { sphere, intersect } from '../../geometry';
+import { intersect, Sphere } from '../../geometry';
 import { Vec3, Vec4 } from '../../math';
 import { SRGBToLinear } from '../pipeline-funcs';
 import { Pass } from '../../renderer/core/pass';
+import { renderQueueClearFunc, RenderQueue, convertRenderQueue, renderQueueSortFunc } from '../render-queue';
+import { RenderQueueDesc } from '../pipeline-serialization';
 
 const colors: Color[] = [new Color(0, 0, 0, 1)];
 const LIGHTINGPASS_INDEX = 1;
@@ -69,6 +70,14 @@ export class LightingStage extends RenderStage {
     @serializable
     @displayOrder(3)
     private _deferredMaterial: Material | null = null;
+
+    @type([RenderQueueDesc])
+    @serializable
+    @displayOrder(2)
+    private renderQueues: RenderQueueDesc[] = [];
+    private _phaseID = getPhaseID('default');
+    private _defPhaseID = getPhaseID('deferred');
+    private _renderQueues: RenderQueue[] = [];
 
     public static initInfo: IRenderStageInfo = {
         name: 'LightingStage',
@@ -95,7 +104,7 @@ export class LightingStage extends RenderStage {
 
         const sphereLights = camera.scene!.sphereLights;
         const spotLights = camera.scene!.spotLights;
-        const _sphere = sphere.create(0, 0, 0, 1);
+        const _sphere = Sphere.create(0, 0, 0, 1);
         const _vec4Array = new Float32Array(4);
         const exposure = camera.exposure;
 
@@ -105,7 +114,7 @@ export class LightingStage extends RenderStage {
 
         for (let i = 0; i < sphereLights.length && idx < this._maxDeferredLights; i++, ++idx) {
             const light = sphereLights[i];
-            sphere.set(_sphere, light.position.x, light.position.y, light.position.z, light.range);
+            Sphere.set(_sphere, light.position.x, light.position.y, light.position.z, light.range);
             if (intersect.sphereFrustum(_sphere, camera.frustum)) {
                 // cc_lightPos
                 Vec3.toArray(_vec4Array, light.position);
@@ -139,7 +148,7 @@ export class LightingStage extends RenderStage {
 
         for (let i = 0; i < spotLights.length && idx < this._maxDeferredLights; i++, ++idx) {
             const light = spotLights[i];
-            sphere.set(_sphere, light.position.x, light.position.y, light.position.z, light.range);
+            Sphere.set(_sphere, light.position.x, light.position.y, light.position.z, light.range);
             if (intersect.sphereFrustum(_sphere, camera.frustum)) {
                 // cc_lightPos
                 Vec3.toArray(_vec4Array, light.position);
@@ -184,6 +193,11 @@ export class LightingStage extends RenderStage {
         super.activate(pipeline, flow);
 
         const device = pipeline.device;
+
+        // activate queue
+        for (let i = 0; i < this.renderQueues.length; i++) {
+            this._renderQueues[i] = convertRenderQueue(this.renderQueues[i]);
+        }
 
         let totalSize = Float32Array.BYTES_PER_ELEMENT * 4 * 4 * this._maxDeferredLights;
         totalSize = Math.ceil(totalSize / device.capabilities.uboOffsetAlignment) * device.capabilities.uboOffsetAlignment;
@@ -231,14 +245,7 @@ export class LightingStage extends RenderStage {
         const dynamicOffsets: number[] = [0];
         cmdBuff.bindDescriptorSet(SetIndex.LOCAL, this._descriptorSet, dynamicOffsets);
 
-        const vp = camera.viewport;
-        // render area is not oriented
-        const w = camera.window!.hasOnScreenAttachments && device.surfaceTransform % 2 ? camera.height : camera.width;
-        const h = camera.window!.hasOnScreenAttachments && device.surfaceTransform % 2 ? camera.width : camera.height;
-        this._renderArea.x = vp.x * w;
-        this._renderArea.y = vp.y * h;
-        this._renderArea.width = vp.width * w * pipeline.pipelineSceneData.shadingScale;
-        this._renderArea.height = vp.height * h * pipeline.pipelineSceneData.shadingScale;
+        this._renderArea = pipeline.generateRenderArea(camera);
 
         if (camera.clearFlag & ClearFlagBit.COLOR) {
             if (pipeline.pipelineSceneData.isHDR) {
@@ -270,10 +277,10 @@ export class LightingStage extends RenderStage {
         const builinDeferred = builtinResMgr.get<Material>('builtin-deferred-material');
         if (builinDeferred) {
             pass = builinDeferred.passes[0];
-            shader = ShaderPool.get(pass.getShaderVariant());
+            shader = pass.getShaderVariant()!;
         } else {
             pass = this._deferredMaterial!.passes[LIGHTINGPASS_INDEX];
-            shader = ShaderPool.get(this._deferredMaterial!.passes[LIGHTINGPASS_INDEX].getShaderVariant());
+            shader = this._deferredMaterial!.passes[LIGHTINGPASS_INDEX].getShaderVariant()!;
         }
 
         const inputAssembler = pipeline.quadIAOffscreen;
@@ -286,6 +293,32 @@ export class LightingStage extends RenderStage {
             cmdBuff.bindPipelineState(pso);
             cmdBuff.bindInputAssembler(inputAssembler);
             cmdBuff.draw(inputAssembler);
+        }
+
+        // Transparent
+        this._renderQueues.forEach(renderQueueClearFunc);
+
+        let m = 0; let p = 0; let k = 0;
+        for (let i = 0; i < renderObjects.length; ++i) {
+            const ro = renderObjects[i];
+            const subModels = ro.model.subModels;
+            for (m = 0; m < subModels.length; ++m) {
+                const subModel = subModels[m];
+                const passes = subModel.passes;
+                for (p = 0; p < passes.length; ++p) {
+                    const pass = passes[p];
+                    // TODO: need fallback of ulit and gizmo material.
+                    if (pass.phase !== this._phaseID && pass.phase !== this._defPhaseID) continue;
+                    for (k = 0; k < this._renderQueues.length; k++) {
+                        this._renderQueues[k].insertRenderPass(ro, m, p);
+                    }
+                }
+            }
+        }
+
+        this._renderQueues.forEach(renderQueueSortFunc);
+        for (let i = 0; i < this._renderQueues.length; i++) {
+            this._renderQueues[i].recordCommandBuffer(device, renderPass, cmdBuff);
         }
 
         // planarQueue

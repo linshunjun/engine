@@ -2,14 +2,19 @@ declare module 'pal/minigame' {
     export const minigame: IMiniGame;
     export interface IMiniGame {
         // system
-        isSubContext: boolean;
         isDevTool: boolean;
         isLandscape: boolean;
+        orientation: import('pal/system/enum-type').Orientation;
         getSystemInfoSync(): SystemInfo;
         onShow(callback: () => void): void;
         offShow(callback: () => void): void;
         onHide(callback: () => void): void;
         offHide(callback: () => void): void;
+        /**
+         * This method returns the standardized SafeArea based on the screen coordinate system,
+         * which is not affected by the orientation of the screen.
+         * @returns {SafeArea} An interface displaying the data of safe area, including 'top', 'bottom', 'left', 'right', 'width' and 'height'.
+         */
         getSafeArea(): SafeArea;
         triggerGC(): void;
         getBatteryInfoSync(): BatteryInfo;
@@ -40,9 +45,57 @@ declare module 'pal/minigame' {
         // device
         onAccelerometerChange(cb: AccelerometerChangeCallback);
         offAccelerometerChange(cb?: AccelerometerChangeCallback);
-        startAccelerometer(obj: AccelerometerParameter);
-        stopAccelerometer(obj: AccelerometerParameter);
+        startAccelerometer(obj: AccelerometerStartParameter);
+        stopAccelerometer(obj: AccelerometerStopParameter);
     }
+
+    export type AccelerometerIntervalMode = 'game' | 'ui' | 'normal';
+
+    export interface AccelerometerStartParameter {
+        interval: AccelerometerIntervalMode,
+        success?: () => void,
+        fail?: (err: any) => void,
+        complete?: () => void,
+    }
+    export interface AccelerometerStopParameter {
+        success?: () => void,
+        fail?: (err: any) => void,
+        complete?: () => void,
+    }
+
+    export interface SystemInfo {
+        brand: string;
+        model: string;
+        pixelRatio: number;
+        screenWidth: number;
+        screenHeight: number;
+        windowWidth: number;
+        windowHeight: number;
+        statusBarHeight: number;
+        language: string;
+        version: string;
+        system: string;
+        platform: string;
+        fontSizeSetting: number;
+        SDKVersion: string;
+        benchmarkLevel: number;
+        albumAuthorized: boolean;
+        cameraAuthorized: boolean;
+        locationAuthorized: boolean;
+        microphoneAuthorized: boolean;
+        notificationAuthorized: boolean;
+        notificationAlertAuthorized: boolean;
+        notificationBadgeAuthorized: boolean;
+        notificationSoundAuthorized: boolean;
+        bluetoothEnabled: boolean;
+        locationEnabled: boolean;
+        wifiEnabled: boolean;
+        safeArea: SafeArea;
+        locationReducedAccuracy: boolean;
+        theme: string;
+        deviceOrientation?: 'portrait' | 'landscape';
+    }
+
 }
 
 declare interface BatteryInfo {
@@ -55,11 +108,6 @@ declare interface AccelerometerData {
     x: number,
     y: number,
     z: number,
-}
-declare interface AccelerometerParameter {
-    success?: () => void,
-    fail?: (err: any) => void,
-    complete?: () => void,
 }
 
 declare interface IEventManager<Event> {
@@ -96,39 +144,6 @@ declare class FileSystemManager {
     writeFile(obj: any);
     writeFileSync();
 }
-
-declare interface SystemInfo {
-    brand: string;
-    model: string;
-    pixelRatio: number;
-    screenWidth: number;
-    screenHeight: number;
-    windowWidth: number;
-    windowHeight: number;
-    statusBarHeight: number;
-    language: string;
-    version: string;
-    system: string;
-    platform: string;
-    fontSizeSetting: number;
-    SDKVersion: string;
-    benchmarkLevel: number;
-    albumAuthorized: boolean;
-    cameraAuthorized: boolean;
-    locationAuthorized: boolean;
-    microphoneAuthorized: boolean;
-    notificationAuthorized: boolean;
-    notificationAlertAuthorized: boolean;
-    notificationBadgeAuthorized: boolean;
-    notificationSoundAuthorized: boolean;
-    bluetoothEnabled: boolean;
-    locationEnabled: boolean;
-    wifiEnabled: boolean;
-    safeArea: SafeArea;
-    locationReducedAccuracy: boolean;
-    theme: string;
-}
-
 declare interface SafeArea {
     left: number;
     right: number;

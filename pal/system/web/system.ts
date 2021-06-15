@@ -109,10 +109,11 @@ class System {
         // TODO: use dack-type to determine the browserType
         // init browserType and browserVersion
         this.browserType = BrowserType.UNKNOWN;
+        const typeReg0 = /wechat|weixin|micromessenger/i;
         const typeReg1 = /mqqbrowser|micromessenger|qqbrowser|sogou|qzone|liebao|maxthon|ucbs|360 aphone|360browser|baiduboxapp|baidubrowser|maxthon|mxbrowser|miuibrowser/i;
         const typeReg2 = /qq|qqbrowser|ucbrowser|ubrowser|edge|HuaweiBrowser/i;
         const typeReg3 = /chrome|safari|firefox|trident|opera|opr\/|oupeng/i;
-        const browserTypes = typeReg1.exec(ua) || typeReg2.exec(ua) || typeReg3.exec(ua);
+        const browserTypes = typeReg0.exec(ua) || typeReg1.exec(ua) || typeReg2.exec(ua) || typeReg3.exec(ua);
 
         let browserType = browserTypes ? browserTypes[0].toLowerCase() : OS.UNKNOWN;
         if (browserType === 'safari' && isAndroid) {
@@ -122,9 +123,11 @@ class System {
         }
         const typeMap = {
             micromessenger: BrowserType.WECHAT,
+            wechat: BrowserType.WECHAT,
+            weixin: BrowserType.WECHAT,
             trident: BrowserType.IE,
             edge: BrowserType.EDGE,
-            '360 aphone': BrowserType._360,
+            '360 aphone': BrowserType.BROWSER_360,
             mxbrowser: BrowserType.MAXTHON,
             'opr/': BrowserType.OPERA,
             ubrowser: BrowserType.UC,
@@ -268,7 +271,12 @@ class System {
         throw new Error('TODO');
     }
     public getSafeAreaEdge (): SafeAreaEdge {
-        throw new Error('TODO');
+        return {
+            top: 0,
+            bottom: 0,
+            left: 0,
+            right: 0,
+        };
     }
     public getBatteryLevel (): number {
         if (this._battery) {
@@ -301,11 +309,19 @@ class System {
         }
     }
 
+    public close () {
+        this._eventTarget.emit(AppEvent.CLOSE);
+        window.close();
+    }
+
     public onHide (cb: () => void) {
         this._eventTarget.on(AppEvent.HIDE, cb);
     }
     public onShow (cb: () => void) {
         this._eventTarget.on(AppEvent.SHOW, cb);
+    }
+    public onClose (cb: () => void) {
+        this._eventTarget.on(AppEvent.CLOSE, cb);
     }
     public onViewResize (cb: () => void) {
         this._eventTarget.on(AppEvent.RESIZE, cb);
@@ -319,6 +335,9 @@ class System {
     }
     public offShow (cb?: () => void) {
         this._eventTarget.off(AppEvent.SHOW, cb);
+    }
+    public offClose (cb?: () => void) {
+        this._eventTarget.off(AppEvent.CLOSE, cb);
     }
     public offViewResize (cb?: () => void) {
         this._eventTarget.off(AppEvent.RESIZE, cb);

@@ -31,7 +31,7 @@
 import { ccclass, help, executionOrder, menu, tooltip, type, slide, range, visible, override, serializable, editable } from 'cc.decorator';
 import { EDITOR } from 'internal:constants';
 import { EventHandler as ComponentEventHandler } from '../core/components';
-import { EventTouch, SystemEventType } from '../core/platform';
+import { EventTouch } from '../core/platform';
 import { Vec2, Vec3 } from '../core/math';
 import { ccenum } from '../core/value-types/enum';
 import { Layout } from './layout';
@@ -42,8 +42,9 @@ import { warnID, logID } from '../core/platform/debug';
 import { extendsEnum } from '../core/data/utils/extends-enum';
 import { Node } from '../core/scene-graph';
 import { legacyCC } from '../core/global-exports';
+import { NodeEventType } from '../core/scene-graph/node-event';
 
-const _temp_vec2 = new Vec2();
+const _tempVec2 = new Vec2();
 
 /**
  * @en Enum for Page View Size Mode.
@@ -319,12 +320,12 @@ export class PageView extends ScrollView {
     protected _initContentPos = new Vec3();
     protected _scrollCenterOffsetX: number[] = []; // 每一个页面居中时需要的偏移量（X）
     protected _scrollCenterOffsetY: number[] = []; // 每一个页面居中时需要的偏移量（Y）
-    protected _touchBeganPosition = new Vec3();
-    protected _touchEndPosition = new Vec3();
+    protected _touchBeganPosition = new Vec2();
+    protected _touchEndPosition = new Vec2();
 
     public onEnable () {
         super.onEnable();
-        this.node.on(SystemEventType.SIZE_CHANGED, this._updateAllPagesSize, this);
+        this.node.on(NodeEventType.SIZE_CHANGED, this._updateAllPagesSize, this);
         if (!EDITOR || legacyCC.GAME_VIEW) {
             this.node.on(PageView.EventType.SCROLL_ENG_WITH_THRESHOLD, this._dispatchPageTurningEvent, this);
         }
@@ -332,7 +333,7 @@ export class PageView extends ScrollView {
 
     public onDisable () {
         super.onDisable();
-        this.node.off(SystemEventType.SIZE_CHANGED, this._updateAllPagesSize, this);
+        this.node.off(NodeEventType.SIZE_CHANGED, this._updateAllPagesSize, this);
         if (!EDITOR || legacyCC.GAME_VIEW) {
             this.node.off(PageView.EventType.SCROLL_ENG_WITH_THRESHOLD, this._dispatchPageTurningEvent, this);
         }
@@ -578,8 +579,8 @@ export class PageView extends ScrollView {
     }
 
     protected _onTouchBegan (event: EventTouch, captureListeners: any) {
-        event.touch!.getUILocation(_temp_vec2);
-        Vec3.set(this._touchBeganPosition, _temp_vec2.x, _temp_vec2.y, 0);
+        event.touch!.getUILocation(_tempVec2);
+        Vec2.set(this._touchBeganPosition, _tempVec2.x, _tempVec2.y);
         super._onTouchBegan(event, captureListeners);
     }
 
@@ -588,14 +589,14 @@ export class PageView extends ScrollView {
     }
 
     protected _onTouchEnded (event: EventTouch, captureListeners: any) {
-        event.touch!.getUILocation(_temp_vec2);
-        Vec3.set(this._touchEndPosition, _temp_vec2.x, _temp_vec2.y, 0);
+        event.touch!.getUILocation(_tempVec2);
+        Vec2.set(this._touchEndPosition, _tempVec2.x, _tempVec2.y);
         super._onTouchEnded(event, captureListeners);
     }
 
     protected _onTouchCancelled (event: EventTouch, captureListeners: any) {
-        event.touch!.getUILocation(_temp_vec2);
-        Vec3.set(this._touchEndPosition, _temp_vec2.x, _temp_vec2.y, 0);
+        event.touch!.getUILocation(_tempVec2);
+        Vec2.set(this._touchEndPosition, _tempVec2.x, _tempVec2.y);
         super._onTouchCancelled(event, captureListeners);
     }
 
@@ -629,7 +630,7 @@ export class PageView extends ScrollView {
     // 初始化页面
     protected _initPages () {
         if (!this.content) { return; }
-        this._initContentPos = this.content.position;
+        this._initContentPos = this.content.position as Vec3;
         const children = this.content.children;
         for (let i = 0; i < children.length; ++i) {
             const page = children[i];
@@ -664,7 +665,7 @@ export class PageView extends ScrollView {
 
     // 通过 idx 获取偏移值数值
     protected _moveOffsetValue (idx: number) {
-        const offset = new Vec3();
+        const offset = new Vec2();
         if (this._sizeMode === SizeMode.Free) {
             if (this.direction === Direction.Horizontal) {
                 offset.x = this._scrollCenterOffsetX[idx];
@@ -685,7 +686,7 @@ export class PageView extends ScrollView {
         return offset;
     }
 
-    protected _getDragDirection (moveOffset: Vec3) {
+    protected _getDragDirection (moveOffset: Vec2) {
         if (this._direction === Direction.Horizontal) {
             if (moveOffset.x === 0) {
                 return 0;
@@ -703,7 +704,7 @@ export class PageView extends ScrollView {
     }
 
     // 是否超过自动滚动临界值
-    protected _isScrollable (offset: Vec3, index: number, nextIndex: number) {
+    protected _isScrollable (offset: Vec2, index: number, nextIndex: number) {
         if (this._sizeMode === SizeMode.Free) {
             let curPageCenter = 0;
             let nextPageCenter = 0;
@@ -719,7 +720,7 @@ export class PageView extends ScrollView {
         } else {
             const viewTrans = this.view;
             if (!viewTrans) {
-                return;
+                return false;
             }
             if (this.direction === Direction.Horizontal) {
                 return Math.abs(offset.x) >= viewTrans.width * this.scrollThreshold;
@@ -727,13 +728,14 @@ export class PageView extends ScrollView {
                 return Math.abs(offset.y) >= viewTrans.height * this.scrollThreshold;
             }
         }
+        return false;
     }
 
     protected _autoScrollToPage () {
         const bounceBackStarted = this._startBounceBackIfNeeded();
         if (bounceBackStarted) {
-            let bounceBackAmount = this._getHowMuchOutOfBoundary();
-            bounceBackAmount = this._clampDelta(bounceBackAmount);
+            const bounceBackAmount = this._getHowMuchOutOfBoundary();
+            this._clampDelta(bounceBackAmount);
             if (bounceBackAmount.x > 0 || bounceBackAmount.y < 0) {
                 this._curPageIdx = this._pages.length === 0 ? 0 : this._pages.length - 1;
             }
@@ -745,8 +747,8 @@ export class PageView extends ScrollView {
                 this.indicator._changedState();
             }
         } else {
-            const moveOffset = new Vec3();
-            Vec3.subtract(moveOffset, this._touchBeganPosition, this._touchEndPosition);
+            const moveOffset = new Vec2();
+            Vec2.subtract(moveOffset, this._touchBeganPosition, this._touchEndPosition);
             const index = this._curPageIdx;
             const nextIndex = index + this._getDragDirection(moveOffset);
             const timeInSecond = this.pageTurningSpeed * Math.abs(index - nextIndex);

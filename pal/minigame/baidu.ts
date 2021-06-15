@@ -1,6 +1,6 @@
 import { IMiniGame } from 'pal/minigame';
 import { Orientation } from '../system/enum-type/orientation';
-import { cloneObject } from '../utils';
+import { cloneObject, createInnerAudioContextPolyfill } from '../utils';
 
 declare let swan: any;
 
@@ -8,72 +8,83 @@ declare let swan: any;
 const minigame: IMiniGame = {};
 cloneObject(minigame, swan);
 
-// SystemInfo
-if (minigame.getSystemInfoSync) {
-    const systemInfo = minigame.getSystemInfoSync();
-    minigame.isDevTool = systemInfo.platform === 'devtools';
-    minigame.isLandscape = systemInfo.screenWidth > systemInfo.screenHeight;
-} else {
-    // can't define window in devtool
-    const descriptor = Object.getOwnPropertyDescriptor(global, 'window');
-    minigame.isDevTool = !(!descriptor || descriptor.configurable === true);
-    minigame.isLandscape = false;
-}
-minigame.isSubContext = (minigame.getOpenDataContext === undefined);
-let orientation = minigame.isLandscape ? Orientation.LANDSCAPE_RIGHT : Orientation.PORTRAIT;
+// #region SystemInfo
+const systemInfo = minigame.getSystemInfoSync();
+minigame.isDevTool = systemInfo.platform === 'devtools';
 
-// Accelerometer
+minigame.isLandscape = systemInfo.screenWidth > systemInfo.screenHeight;
+// init landscapeOrientation as LANDSCAPE_RIGHT
+let landscapeOrientation = Orientation.LANDSCAPE_RIGHT;
 swan.onDeviceOrientationChange((res) => {
     if (res.value === 'landscape') {
-        orientation = Orientation.LANDSCAPE_RIGHT;
+        landscapeOrientation = Orientation.LANDSCAPE_RIGHT;
     } else if (res.value === 'landscapeReverse') {
-        orientation = Orientation.LANDSCAPE_LEFT;
+        landscapeOrientation = Orientation.LANDSCAPE_LEFT;
     }
 });
+Object.defineProperty(minigame, 'orientation', {
+    get () {
+        return minigame.isLandscape ? landscapeOrientation : Orientation.PORTRAIT;
+    },
+});
+// #endregion SystemInfo
 
-minigame.onAccelerometerChange = function (cb) {
-    swan.onAccelerometerChange((res) => {
-        let x = res.x;
-        let y = res.y;
-        if (minigame.isLandscape) {
-            const orientationFactor = orientation === Orientation.LANDSCAPE_RIGHT ? 1 : -1;
-            const tmp = x;
-            x = -y * orientationFactor;
-            y = tmp * orientationFactor;
-        }
+// #region Accelerometer
+let _customAccelerometerCb: AccelerometerChangeCallback | undefined;
+let _innerAccelerometerCb: AccelerometerChangeCallback | undefined;
+minigame.onAccelerometerChange = function (cb: AccelerometerChangeCallback) {
+    // swan.offAccelerometerChange() is not supported.
+    // so we can only register AccelerometerChange callback, but can't unregister.
+    if (!_innerAccelerometerCb) {
+        _innerAccelerometerCb = (res: any) => {
+            let x = res.x;
+            let y = res.y;
+            if (minigame.isLandscape) {
+                const orientationFactor = (landscapeOrientation === Orientation.LANDSCAPE_RIGHT ? 1 : -1);
+                const tmp = x;
+                x = -y * orientationFactor;
+                y = tmp * orientationFactor;
+            }
 
-        const resClone = {
-            x,
-            y,
-            z: res.z,
+            const resClone = {
+                x,
+                y,
+                z: res.z,
+            };
+            _customAccelerometerCb?.(resClone);
         };
-        cb(resClone);
-    });
-    // onAccelerometerChange would start accelerometer, need to mannually stop it
-    swan.stopAccelerometer();
+        swan.onAccelerometerChange(_innerAccelerometerCb);
+        // onAccelerometerChange would start accelerometer, need to stop it mannually
+        swan.stopAccelerometer({});
+    }
+    _customAccelerometerCb = cb;
 };
+minigame.offAccelerometerChange = function (cb?: AccelerometerChangeCallback) {
+    // swan.offAccelerometerChange() is not supported.
+    _customAccelerometerCb = undefined;
+};
+// #endregion Accelerometer
 
+minigame.createInnerAudioContext = createInnerAudioContextPolyfill(swan, {
+    onPlay: true,
+    onPause: true,
+    onStop: true,
+    onSeek: false,
+});
+
+// #region SafeArea
 minigame.getSafeArea = function () {
     console.warn('getSafeArea is not supported on this platform');
-    if (minigame.getSystemInfoSync) {
-        const systemInfo =  minigame.getSystemInfoSync();
-        return {
-            top: 0,
-            left: 0,
-            bottom: systemInfo.screenHeight,
-            right: systemInfo.screenWidth,
-            width: systemInfo.screenWidth,
-            height: systemInfo.screenHeight,
-        };
-    }
+    const systemInfo =  minigame.getSystemInfoSync();
     return {
         top: 0,
         left: 0,
-        bottom: 0,
-        right: 0,
-        width: 0,
-        height: 0,
+        bottom: systemInfo.screenHeight,
+        right: systemInfo.screenWidth,
+        width: systemInfo.screenWidth,
+        height: systemInfo.screenHeight,
     };
 };
+// #endregion SafeArea
 
 export { minigame };

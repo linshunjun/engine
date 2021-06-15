@@ -31,11 +31,12 @@
 
 import { Event } from '../../event';
 import { EventTouch } from './events';
-import { EventListener, TouchOneByOne } from './event-listener';
+import { EventListener, TouchOneByOneEventListener } from './event-listener';
 import { Node } from '../../scene-graph';
 import { macro } from '../macro';
 import { legacyCC } from '../../global-exports';
 import { errorID, warnID, logID, assertID } from '../debug';
+import { DeviceEvent, KeyboardEvent, MouseEvent, TouchEvent } from './event-enum';
 
 const ListenerID = EventListener.ListenerID;
 
@@ -45,6 +46,10 @@ function checkUINode (node) {
     }
     return false;
 }
+
+const touchEvents: string[] = [TouchEvent.TOUCH_START, TouchEvent.TOUCH_MOVE, TouchEvent.TOUCH_END, TouchEvent.TOUCH_CANCEL];
+const mouseEvents: string[] = [MouseEvent.MOUSE_DOWN, MouseEvent.MOUSE_MOVE, MouseEvent.MOUSE_DOWN, MouseEvent.MOUSE_WHEEL];
+const keyboardEvents: string[] = [KeyboardEvent.KEY_DOWN, KeyboardEvent.KEY_UP, 'keydown'];
 
 class _EventListenerVector {
     public gt0Index = 0;
@@ -90,18 +95,17 @@ class _EventListenerVector {
 }
 
 function __getListenerID (event: Event) {
-    const eventType = Event;
     const type = event.type;
-    if (type === eventType.ACCELERATION) {
+    if (type === DeviceEvent.DEVICEMOTION) {
         return ListenerID.ACCELERATION;
     }
-    if (type === eventType.KEYBOARD) {
+    if (keyboardEvents.includes(type)) {
         return ListenerID.KEYBOARD;
     }
-    if (type.startsWith(eventType.MOUSE)) {
+    if (mouseEvents.includes(type)) {
         return ListenerID.MOUSE;
     }
-    if (type.startsWith(eventType.TOUCH)) {
+    if (touchEvents.includes(type)) {
         // Touch listener is very special, it contains two kinds of listeners:
         // EventListenerTouchOneByOne and EventListenerTouchAllAtOnce.
         // return UNKNOWN instead.
@@ -568,7 +572,7 @@ class EventManager {
             errorID(3511);
             return;
         }
-        if (event.getType().startsWith(legacyCC.Event.TOUCH)) {
+        if (touchEvents.includes(event.getType())) {
             this._dispatchTouchEvent(event as EventTouch);
             this._inDispatch--;
             return;
@@ -936,7 +940,7 @@ class EventManager {
         toRemovedListeners.length = 0;
     }
 
-    private _onTouchEventCallback (listener: TouchOneByOne, argsObj: any) {
+    private _onTouchEventCallback (listener: TouchOneByOneEventListener, argsObj: any) {
         // Skip if the listener was removed.
         if (!listener._isRegistered()) {
             return false;
@@ -948,9 +952,8 @@ class EventManager {
 
         let isClaimed = false;
         let removedIdx = -1;
-        const getCode = event.getEventCode();
-        // const EventTouch = cc.Event.EventTouch;
-        if (getCode === EventTouch.BEGAN) {
+        const eventType = event.type;
+        if (eventType === TouchEvent.TOUCH_START) {
             if (!macro.ENABLE_MULTI_TOUCH && eventManager._currentTouch) {
                 const node = eventManager._currentTouchListener._node;
                 if (!node || node.activeInHierarchy) {
@@ -975,9 +978,9 @@ class EventManager {
                 if (!macro.ENABLE_MULTI_TOUCH && eventManager._currentTouch && eventManager._currentTouch !== selTouch) {
                     return false;
                 }
-                if (getCode === EventTouch.MOVED && listener.onTouchMoved) {
+                if (eventType === TouchEvent.TOUCH_MOVE && listener.onTouchMoved) {
                     listener.onTouchMoved(selTouch, event);
-                } else if (getCode === EventTouch.ENDED) {
+                } else if (eventType === TouchEvent.TOUCH_END) {
                     if (listener.onTouchEnded) {
                         listener.onTouchEnded(selTouch, event);
                     }
@@ -990,7 +993,7 @@ class EventManager {
                     }
 
                     eventManager._currentTouchListener = null;
-                } else if (getCode === EventTouch.CANCELLED) {
+                } else if (eventType === TouchEvent.TOUCH_CANCEL) {
                     if (listener.onTouchCancelled) {
                         listener.onTouchCancelled(selTouch, event);
                     }
@@ -1068,18 +1071,17 @@ class EventManager {
             return false;
         }
 
-        // const EventTouch = cc.Event.EventTouch;
         const event = callbackParams.event;
         const touches = callbackParams.touches;
-        const getCode = event.getEventCode();
+        const eventType = event.type;
         event.currentTarget = listener._getSceneGraphPriority();
-        if (getCode === EventTouch.BEGAN && listener.onTouchesBegan) {
+        if (eventType === TouchEvent.TOUCH_START && listener.onTouchesBegan) {
             listener.onTouchesBegan(touches, event);
-        } else if (getCode === EventTouch.MOVED && listener.onTouchesMoved) {
+        } else if (eventType === TouchEvent.TOUCH_MOVE && listener.onTouchesMoved) {
             listener.onTouchesMoved(touches, event);
-        } else if (getCode === EventTouch.ENDED && listener.onTouchesEnded) {
+        } else if (eventType === TouchEvent.TOUCH_END && listener.onTouchesEnded) {
             listener.onTouchesEnded(touches, event);
-        } else if (getCode === EventTouch.CANCELLED && listener.onTouchesCancelled) {
+        } else if (eventType === TouchEvent.TOUCH_CANCEL && listener.onTouchesCancelled) {
             listener.onTouchesCancelled(touches, event);
         }
 

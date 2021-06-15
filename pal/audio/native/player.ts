@@ -1,15 +1,54 @@
-import { OneShotAudio } from 'pal/audio';
+import { system } from 'pal/system';
 import { AudioType, AudioState, AudioEvent } from '../type';
 import { EventTarget } from '../../../cocos/core/event/event-target';
 import { legacyCC } from '../../../cocos/core/global-exports';
 import { clamp, clamp01 } from '../../../cocos/core';
 import { enqueueOperation, OperationInfo, OperationQueueable } from '../operation-queue';
+import { Platform } from '../../system/enum-type';
 
 const urlCount: Record<string, number> = {};
 const audioEngine = jsb.AudioEngine;
 const INVALID_AUDIO_ID = -1;
 
-// TODO: set state before playing
+export class OneShotAudio {
+    private _id: number = INVALID_AUDIO_ID;
+    private _url: string;
+    private _volume: number;
+    private _onPlayCb?: () => void;
+    get onPlay () {
+        return this._onPlayCb;
+    }
+    set onPlay (cb) {
+        this._onPlayCb = cb;
+    }
+
+    private _onEndCb?: () => void;
+    get onEnd () {
+        return this._onEndCb;
+    }
+    set onEnd (cb) {
+        this._onEndCb = cb;
+    }
+
+    private constructor (url: string, volume: number)  {
+        this._url = url;
+        this._volume = volume;
+    }
+    public play (): void {
+        this._id = jsb.AudioEngine.play2d(this._url, false, this._volume);
+        jsb.AudioEngine.setFinishCallback(this._id, () => {
+            this.onEnd?.();
+        });
+        this.onPlay?.();
+    }
+    public stop (): void {
+        if (this._id === INVALID_AUDIO_ID) {
+            return;
+        }
+        jsb.AudioEngine.stop(this._id);
+    }
+}
+
 export class AudioPlayer implements OperationQueueable {
     private _url: string;
     private _id: number = INVALID_AUDIO_ID;
@@ -74,13 +113,27 @@ export class AudioPlayer implements OperationQueueable {
     }
     static loadNative (url: string): Promise<unknown> {
         return new Promise((resolve, reject) => {
-            audioEngine.preload(url, (isSuccess) => {
-                if (isSuccess) {
-                    resolve(url);
-                } else {
-                    reject(new Error('load audio failed'));
-                }
-            });
+            if (system.platform === Platform.WIN32) {
+                // NOTE: audioEngine.preload() not works well on Win32 platform.
+                // Especially when there is not audio output device.
+                resolve(url);
+            } else {
+                audioEngine.preload(url, (isSuccess) => {
+                    if (isSuccess) {
+                        resolve(url);
+                    } else {
+                        reject(new Error('load audio failed'));
+                    }
+                });
+            }
+        });
+    }
+    static loadOneShotAudio (url: string, volume: number): Promise<OneShotAudio> {
+        return new Promise((resolve, reject) => {
+            AudioPlayer.loadNative(url).then((url) => {
+                // @ts-expect-error AudioPlayer should be a friend class in OneShotAudio
+                resolve(new OneShotAudio(url, volume));
+            }).catch(reject);
         });
     }
     static readonly maxAudioChannel: number = audioEngine.getMaxAudioInstance();
@@ -149,31 +202,6 @@ export class AudioPlayer implements OperationQueueable {
             audioEngine.setCurrentTime(this._id, time);
             return resolve();
         });
-    }
-    playOneShot (volume = 1): OneShotAudio {
-        let id = INVALID_AUDIO_ID;
-        let onPlayCb: () => void;
-        let onEndedCb: () => void;
-        setTimeout(() => {
-            id = audioEngine.play2d(this._url, false, volume);
-            onPlayCb && onPlayCb();
-            onEndedCb && audioEngine.setFinishCallback(id, onEndedCb);
-        });
-        return {
-            stop () {
-                if (id !== INVALID_AUDIO_ID) {
-                    audioEngine.stop(id);
-                }
-            },
-            onPlay (cb) {
-                onPlayCb = cb;
-                return this;
-            },
-            onEnded (cb) {
-                onEndedCb = cb;
-                return this;
-            },
-        };
     }
 
     @enqueueOperation
