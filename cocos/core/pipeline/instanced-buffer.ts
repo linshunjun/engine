@@ -86,7 +86,6 @@ export class InstancedBuffer {
         const lightingMap = subModel.descriptorSet.getTexture(UNIFORM_LIGHTMAP_TEXTURE_BINDING);
         let shader  = shaderImplant;
         if (!shader) {
-            // shader = subModel.passes[passIdx].getShaderVariant();
             shader = subModel.shaders[passIdx];
         }
         const descriptorSet = subModel.descriptorSet;
