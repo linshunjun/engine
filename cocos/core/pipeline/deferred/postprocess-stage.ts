@@ -123,7 +123,7 @@ export class PostprocessStage extends RenderStage {
         let pass: Pass;
         let shader: Shader;
         const builtinPostProcess = builtinResMgr.get<Material>('builtin-post-process-material');
-        if (builtinPostProcess) {
+        if (!this._postprocessMaterial) {
             pass = builtinPostProcess.passes[0];
             shader = pass.getShaderVariant()!;
         } else {

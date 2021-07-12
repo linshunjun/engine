@@ -49,7 +49,7 @@ import { renderQueueClearFunc, RenderQueue, convertRenderQueue, renderQueueSortF
 import { RenderQueueDesc } from '../pipeline-serialization';
 
 const colors: Color[] = [new Color(0, 0, 0, 1)];
-const LIGHTINGPASS_INDEX = 1;
+const LIGHTINGPASS_INDEX = 0;
 
 /**
  * @en The lighting render stage
@@ -275,7 +275,7 @@ export class LightingStage extends RenderStage {
         let pass: Pass;
         let shader: Shader;
         const builinDeferred = builtinResMgr.get<Material>('builtin-deferred-material');
-        if (builinDeferred) {
+        if (!this._deferredMaterial) {
             pass = builinDeferred.passes[0];
             shader = pass.getShaderVariant()!;
         } else {
