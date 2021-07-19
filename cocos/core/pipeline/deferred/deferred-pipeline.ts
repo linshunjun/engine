@@ -530,7 +530,7 @@ export class DeferredPipeline extends RenderPipeline {
         data.gbufferRenderTargets.push(device.createTexture(new TextureInfo(
             TextureType.TEX2D,
             TextureUsageBit.COLOR_ATTACHMENT | TextureUsageBit.SAMPLED,
-            Format.RGBA16F,
+            Format.RGBA32F,
             this._width,
             this._height,
         )));
