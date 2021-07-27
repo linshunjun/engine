@@ -25,6 +25,7 @@ CCEffect %{
     r1: &r1 { cullMode: none }
     p1: &p1
       mainTexture:            { value: grey }
+      normalTexture:          { value: grey }
       mainTiling_Offset:      { value: [1, 1, 0, 0]  }
     p2: &p2
       <<: *p1
@@ -78,18 +79,36 @@ CCEffect %{
 CCProgram tinted-fs %{
   precision mediump float;
   #include <output>
+  #include <shading-standard-base>
 
   in vec2 uv;
   in vec4 color;
+  in vec4 o_position;
 
   uniform sampler2D mainTexture;
+  uniform sampler2D normalTexture;
   uniform FragConstants {
     vec4 tintColor;
   };
 
   vec4 add () {
+    vec4 normalTex = texture(normalTexture, uv);
+    vec4 N = cc_matViewInv * normalTex;
+
+    vec4 position = cc_matViewProjInv * o_position;
+    position.xyz /= position.w;
+
+    vec3 V = normalize(cc_cameraPos.xyz - position.xyz);
+    float NV = max(abs(dot(N.xyz, V)), 0.001);
+
     vec4 col = 2.0 * color * tintColor * texture(mainTexture, uv);
-    return CCFragOutput(col);
+
+    vec3 specular = mix(vec3(0.04), col.rgb, 3.0);
+    vec3 fc = BRDFApprox(specular, 0.1, NV );
+
+    return CCFragOutput(vec4(fc, col.a));
+    //return CCFragOutput(col);
+    
   }
 
   vec4 multiply () {
@@ -108,6 +127,7 @@ CCProgram no-tint-fs %{
   in vec4 color;
 
   uniform sampler2D mainTexture;
+  uniform sampler2D normalTexture;
 
   vec4 addSmooth () {
     vec4 col = color * texture(mainTexture, uv);

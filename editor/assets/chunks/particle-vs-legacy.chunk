@@ -9,6 +9,7 @@ in vec3 a_texCoord;  // xy:vertex index,z:frame index
 in vec3 a_texCoord1; // size
 in vec3 a_texCoord2; // rotation
 in vec4 a_color;
+out vec4 o_position;
 
 #if CC_RENDER_MODE == RENDER_MODE_STRETCHED_BILLBOARD
   in vec3 a_color1; // velocity.x, velocity.y, velocity.z, scale
@@ -69,6 +70,8 @@ vec4 lpvs_main () {
   #endif
   uv = computeUV(a_texCoord.z, a_texCoord.xy, frameTile_velLenScale.xy) * mainTiling_Offset.xy + mainTiling_Offset.zw;
 
+
+  o_position = pos;
   pos = cc_matViewProj * pos;
 
   return pos;
